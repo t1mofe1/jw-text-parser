@@ -1,32 +1,51 @@
 const axios = require('axios').default;
 
-async function getText(language = 'en', year = new Date().getFullYear().toString(), month = (new Date().getMonth() + 1).toString(), day = new Date().getDate().toString()) {
-	// GET CODE
-	let code = await axios.get(`https://wol.jw.org/${language}/wol/h/`).then((res) => {
-		return res.request.path.substring(10);
+async function getJWText(language = 'en', year = new Date().getFullYear(), month = new Date().getMonth() + 1, day = new Date().getDate(), references = true) {
+	if (!year || !month || !day) {
+		const date = new Date();
+		if (!year) year = date.getFullYear();
+		if (!month) month = date.getMonth() + 1;
+		if (!day) day = date.getDate();
+	}
+
+	if (month > 12 || month < 1 || day > new Date(year, month, 0).getDate()) {
+		return Error('Wrong time');
+	}
+
+	const link = `https://wol.jw.org/${language}/wol/h/`;
+
+	let code = await axios.get(link);
+	if (language !== code.request.path.substring(1, code.request.path.substring(1).search('/') + 1)) return Error('Wrong language');
+	code = code.request.path.substring(10);
+
+	let html = await axios.get(`https://wol.jw.org/wol/dt/${code}/${year}/${month}/${day}`);
+	if (html?.data?.items && html.data.items[0] && html.data.items[0].content) {
+		html = html.data.items[0].content.replaceAll('\r\n', '').replaceAll('\\', '');
+	} else {
+		return Error('Text not found');
+	}
+
+	const $ = require('cheerio').load(html);
+
+	let date = $('header')[0].children[0].children[0].data + ` ${year}`;
+
+	let header = $('p')[0].children[0].children[0].data + $('p')[0].children[1].children[0].children[0].data + ')';
+
+	let content = '';
+	$('.bodyTxt')[0].children[0].children[0].children[0].children.forEach((child) => {
+		if (child.data) {
+			content += child.data;
+		} else if (references) {
+			if (!child.children[0].data) {
+				content += `[${child.children[0].children[0].data}${child.children[1].data}](${new URL(child.attribs.href, 'https://wol.jw.org').toString()})`;
+			} else {
+				content += `[${child.children[0].data}](${new URL(child.attribs.href, 'https://wol.jw.org').toString()})`;
+			}
+		} else {
+			content += child.children[0].data ? child.children[0].data : child.children[0].children[0].data + child.children[1].data;
+		}
 	});
-
-	// GET HTML
-	let html = await axios.get(`https://wol.jw.org/wol/dt/${code}/${year}/${month}/${day}`).then((res) => {
-		return res.data.items[0].content;
-	});
-
-	// DATE
-	let date = html.substring(html.search('<h2 id=\\"p'), html.search('</h2>')).substring(html.substring(html.search('<h2 id=\\"p'), html.search('</h2>')).search('>') + 1);
-
-	// HEADER
-	let header = `${html.substring(html.search('<em>') + 4, html.search('</em>') - 2)} (${html.substring(html.search('class="b"><em>') + 14, html.search('</em></a>'))}).`;
-
-	// TEXT
-	let text = html.substring(html.search('class="sb">') + 11, html.search(' <a href="/wol'));
-	text = text.replaceAll(
-		/<a href="\/wol\/bc\/r[1-9][0-9]?[0-9]?\/lp-[a-z][a-z]?\/11020200[0-9][0-9]\/[1-9][0-9]?[0-9]?\/[0-9][0-9]?[0-9]?" data-bid="[1-9][0-9]?[0-9]?-[1-9][0-9]?[0-9]?" class="[a-z]">/gi,
-		'',
-	);
-	text = text.replaceAll('</a>', '');
-	text = text.replaceAll(/<span id="page[1-9][0-9]?[0-9]?[0-9]?" class="pageNum" data-no="[1-9][0-9]?[0-9]?[0-9]?" data-before-text="[1-9][0-9]?[0-9]?[0-9]?"><\/span>/gi, '');
-
-	return { date, header, text };
+	return { date, header, text: content, link };
 }
 
-module.exports = getText;
+module.exports = getJWText;
